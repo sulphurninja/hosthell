@@ -141,8 +141,7 @@ export default function AccessServerPage() {
 
           <div className="mt-6 pt-5 border-t border-zinc-800">
             <p className="text-center text-xs text-zinc-600">
-              Credentials are generated for each order at{" "}
-              <span className="text-red-400/80 font-medium">oceanlinux.com</span>
+              Use the credentials from your order to access your server
             </p>
           </div>
         </div>
