@@ -32,13 +32,15 @@ const orderSchema = new mongoose.Schema(
     webhookCustomerEmail: { type: String },
     provider: {
       type: String,
-      enum: ["hostycare", "smartvps", "slotip"],
+      enum: ["hostycare", "smartvps", "slotip", "advps"],
       default: "hostycare",
     },
     hostycareServiceId: { type: String },
     hostycareProductId: { type: String },
     smartvpsServiceId: { type: String },
     smartvpsProductId: { type: String },
+    advpsServiceId: { type: String },
+    advpsProductId: { type: String },
     provisioningStatus: {
       type: String,
       enum: ["pending", "provisioning", "active", "failed", "suspended", "terminated"],

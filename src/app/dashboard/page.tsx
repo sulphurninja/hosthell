@@ -64,6 +64,7 @@ interface OrderData {
   provider: string;
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
+  advpsServiceId?: string;
   slotIpPackageId?: string;
   provisioningStatus: string;
   status: string;
@@ -127,7 +128,7 @@ export default function DashboardPage() {
   }, []);
 
   const fetchTemplates = useCallback(async () => {
-    if (!order || order.provider === "smartvps") return;
+    if (!order || order.provider === "smartvps" || order.provider === "advps") return;
     setTemplatesLoading(true);
     try {
       const res = await fetch("/api/server/action", {
@@ -210,6 +211,7 @@ export default function DashboardPage() {
   if (!order) return null;
 
   const isSmartVps = order.provider === "smartvps";
+  const isAdvps = order.provider === "advps" || !!order.advpsServiceId;
   const daysLeft = order.expiryDate
     ? Math.ceil((new Date(order.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null;
@@ -334,21 +336,21 @@ export default function DashboardPage() {
           </div>
 
           {/* Format */}
-          {isSmartVps && (
+          {(isSmartVps || isAdvps) && (
             <div>
-              <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Format Server</h3>
+              <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">{isAdvps ? "Rebuild Server" : "Format Server"}</h3>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button className="bg-red-600 hover:bg-red-700 text-white border-0" disabled={actionLoading !== null}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Format Server
+                    {actionLoading === "format" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    {isAdvps ? "Rebuild Server" : "Format Server"}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent className="bg-zinc-900 border-zinc-800">
                   <AlertDialogHeader>
                     <AlertDialogTitle className="flex items-center gap-2 text-white">
                       <AlertTriangle className="h-5 w-5 text-red-500" />
-                      Format Server
+                      {isAdvps ? "Rebuild Server" : "Format Server"}
                     </AlertDialogTitle>
                     <AlertDialogDescription className="text-zinc-400">
                       This will erase all data and reset to factory state. Cannot be undone.
@@ -357,7 +359,7 @@ export default function DashboardPage() {
                   <AlertDialogFooter>
                     <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">Cancel</AlertDialogCancel>
                     <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={() => performAction("format")}>
-                      Format
+                      {isAdvps ? "Rebuild" : "Format"}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -366,6 +368,7 @@ export default function DashboardPage() {
           )}
 
           {/* Reinstall */}
+          {!isAdvps && (
           <div>
             <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
               {isSmartVps ? "Change OS" : "Reinstall OS"}
@@ -457,6 +460,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

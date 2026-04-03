@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     await connectDB();
 
     const order = await Order.findById(sessionCookie.value).select(
-      "productName memory price ipAddress username password os expiryDate provider hostycareServiceId smartvpsServiceId slotIpPackageId provisioningStatus lastAction lastActionTime status panelUsername"
+      "productName memory price ipAddress username password os expiryDate provider hostycareServiceId smartvpsServiceId advpsServiceId slotIpPackageId provisioningStatus lastAction lastActionTime status panelUsername"
     );
 
     if (!order) {

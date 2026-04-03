@@ -5,6 +5,7 @@ import { execSync } from "child_process";
 
 const HostycareAPI = require("@/services/hostycareApi");
 const SmartVpsAPI = require("@/services/smartvpsApi");
+const AdvpsAPI = require("@/services/advpsApi");
 import { VirtualizorAPI } from "@/services/virtualizorApi";
 
 function generateSecurePassword() {
@@ -106,12 +107,20 @@ export async function POST(request: NextRequest) {
     let virtualizorApi: any = null;
     let hostycareApi: any = null;
     let smartvpsApi: any = null;
+    let advpsApi: any = null;
 
     const isSmartVps =
       order.provider === "smartvps" ||
       (order.productName && order.productName.includes("🌊"));
 
-    if (isSmartVps) {
+    const isAdvps =
+      order.provider === "advps" ||
+      order.advpsServiceId ||
+      (order.productName && order.productName.includes("⚡"));
+
+    if (isAdvps && order.advpsServiceId) {
+      advpsApi = new AdvpsAPI();
+    } else if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();
     } else if (order.provider === "hostycare" || !order.provider) {
       hostycareApi = new HostycareAPI();
@@ -122,7 +131,10 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "start":
-        if (smartvpsApi) {
+        if (advpsApi) {
+          const apiRes = await advpsApi.start(order.advpsServiceId);
+          result = { success: true, message: "Start command sent", apiResponse: apiRes };
+        } else if (smartvpsApi) {
           const apiRes = await smartvpsApi.start(ipAddress);
           result = { success: true, message: "Start command sent", apiResponse: apiRes };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -134,7 +146,10 @@ export async function POST(request: NextRequest) {
         break;
 
       case "stop":
-        if (smartvpsApi) {
+        if (advpsApi) {
+          const apiRes = await advpsApi.stop(order.advpsServiceId);
+          result = { success: true, message: "Stop command sent", apiResponse: apiRes };
+        } else if (smartvpsApi) {
           const apiRes = await smartvpsApi.stop(ipAddress);
           result = { success: true, message: "Stop command sent", apiResponse: apiRes };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -146,7 +161,10 @@ export async function POST(request: NextRequest) {
         break;
 
       case "restart":
-        if (smartvpsApi) {
+        if (advpsApi) {
+          const apiRes = await advpsApi.reboot(order.advpsServiceId);
+          result = { success: true, message: "Restart command sent", apiResponse: apiRes };
+        } else if (smartvpsApi) {
           await smartvpsApi.stop(ipAddress);
           await new Promise((r) => setTimeout(r, 2000));
           const apiRes = await smartvpsApi.start(ipAddress);
@@ -160,6 +178,22 @@ export async function POST(request: NextRequest) {
         break;
 
       case "status": {
+        if (advpsApi) {
+          try {
+            const apiRes = await advpsApi.status(order.advpsServiceId);
+            let powerState = "unknown";
+            const runSt = apiRes?.data?.vmStatus?.status || apiRes?.data?.runningStatus || "";
+            if (typeof runSt === "string") {
+              const sl = runSt.toLowerCase();
+              if (["running", "online", "started", "active"].includes(sl)) powerState = "running";
+              else if (["stopped", "offline", "shutdown"].includes(sl)) powerState = "stopped";
+              else powerState = sl;
+            }
+            return NextResponse.json({ success: true, powerState, rawStatus: apiRes?.data, provider: "advps", lastSync: new Date().toISOString() });
+          } catch (e: any) {
+            return NextResponse.json({ success: false, error: e.message, powerState: "unknown", provider: "advps" });
+          }
+        }
         if (smartvpsApi) {
           try {
             const apiRes = await smartvpsApi.status(ipAddress);
@@ -220,11 +254,37 @@ export async function POST(request: NextRequest) {
       }
 
       case "format":
-        if (smartvpsApi) {
+        if (advpsApi) {
+          const os = body.os || body.osType || payload?.os || order.os || "ubuntu-22.04";
+          const apiRes = await advpsApi.rebuild(order.advpsServiceId, os);
+          if (apiRes?.data?.taskId) {
+            let taskDone = false;
+            for (let i = 0; i < 20; i++) {
+              await new Promise((r) => setTimeout(r, 5000));
+              try {
+                const taskRes = await advpsApi.taskStatus(apiRes.data.taskId);
+                if (taskRes?.data?.status === "COMPLETED") { taskDone = true; break; }
+                if (taskRes?.data?.status === "FAILED") break;
+              } catch {}
+            }
+            if (taskDone) {
+              await new Promise((r) => setTimeout(r, 10000));
+              try {
+                const pwdRes = await advpsApi.generatePassword(order.advpsServiceId);
+                const pwd = pwdRes?.data?.password || pwdRes?.data?.newPassword || pwdRes?.data?.existingPassword;
+                if (pwd) {
+                  await Order.findByIdAndUpdate(orderId, { $set: { password: pwd, lastAction: "format", lastActionTime: new Date() } });
+                  return NextResponse.json({ success: true, result: { accepted: true, message: "Rebuild complete, new password set", newPassword: pwd } });
+                }
+              } catch {}
+            }
+          }
+          result = { success: true, message: "Rebuild command sent", apiResponse: apiRes };
+        } else if (smartvpsApi) {
           const apiRes = await smartvpsApi.format(ipAddress);
           result = { success: true, message: "Format command sent", apiResponse: apiRes };
         } else {
-          throw new Error("Format is only available for SmartVPS");
+          throw new Error("Format is not available for this provider");
         }
         break;
 
