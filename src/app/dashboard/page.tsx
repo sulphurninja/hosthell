@@ -264,6 +264,21 @@ export default function DashboardPage() {
     }
   };
 
+  const getOrderStatusBadge = () => {
+    const s = order?.status?.toLowerCase() || "";
+    if (s === "active")
+      return <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Active</Badge>;
+    if (s === "confirmed" || s === "paid")
+      return <Badge className="bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium capitalize">{order?.status}</Badge>;
+    if (s === "pending")
+      return <Badge className="bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Pending</Badge>;
+    if (s === "failed" || s === "invalid")
+      return <Badge className="bg-red-500/10 text-red-400 border border-red-500/20 font-medium capitalize">{order?.status}</Badge>;
+    if (s === "expired")
+      return <Badge className="bg-zinc-800 text-zinc-400 border border-zinc-700 font-medium">Expired</Badge>;
+    return <Badge className="bg-zinc-800 text-zinc-400 border border-zinc-700 font-medium capitalize">{order?.status || "Unknown"}</Badge>;
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -290,7 +305,7 @@ export default function DashboardPage() {
           <StatItem icon={<Globe className="h-4 w-4" />} label="IP Address" value={order.ipAddress || "Pending"} onCopy={order.ipAddress ? () => cp(order.ipAddress, "IP") : undefined} />
           <StatItem icon={<Cpu className="h-4 w-4" />} label="OS" value={order.os} />
           <StatItem icon={<HardDrive className="h-4 w-4" />} label="Memory" value={order.memory} />
-          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={order.provider || "hostycare"} />
+          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={isManual ? "OceanLinux" : (order.provider || "hostycare")} />
           <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
             <Calendar className="h-4 w-4 text-zinc-500 mt-0.5" />
             <div className="min-w-0">
@@ -310,7 +325,7 @@ export default function DashboardPage() {
             <div className="min-w-0">
               <p className="text-[11px] text-zinc-500 uppercase tracking-wider">Status</p>
               <div className="flex items-center gap-2 mt-1">
-                {statusLoading ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : getPowerBadge()}
+                {statusLoading ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : isManual ? getOrderStatusBadge() : getPowerBadge()}
               </div>
             </div>
           </div>
