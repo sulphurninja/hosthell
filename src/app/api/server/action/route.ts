@@ -5,8 +5,27 @@ import { execSync } from "child_process";
 
 const HostycareAPI = require("@/services/hostycareApi");
 const SmartVpsAPI = require("@/services/smartvpsApi");
-const AdvpsAPI = require("@/services/advpsApi");
 import { VirtualizorAPI } from "@/services/virtualizorApi";
+
+const OCEANLINUX_URL = process.env.NEXT_PUBLIC_OCEANLINUX_URL || "https://oceanlinux.com";
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || "";
+
+async function proxyAdvpsAction(orderId: string, action: string) {
+  const res = await fetch(`${OCEANLINUX_URL}/api/internal/advps-action`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-internal-key": INTERNAL_API_KEY,
+    },
+    body: JSON.stringify({ orderId, action }),
+    cache: "no-store",
+  });
+  const data = await res.json();
+  if (!res.ok && !data.success) {
+    throw new Error(data.error || `Proxy ADVPS action failed: ${res.status}`);
+  }
+  return data;
+}
 
 function generateSecurePassword() {
   const length = 20;
@@ -107,19 +126,26 @@ export async function POST(request: NextRequest) {
     let virtualizorApi: any = null;
     let hostycareApi: any = null;
     let smartvpsApi: any = null;
-    let advpsApi: any = null;
 
     const isSmartVps =
       order.provider === "smartvps" ||
       (order.productName && order.productName.includes("🌊"));
 
     const isAdvps =
-      order.provider === "advps" ||
-      order.advpsServiceId ||
-      (order.productName && order.productName.includes("⚡"));
+      (order.provider === "advps" || order.advpsServiceId || (order.productName && order.productName.includes("⚡")))
+      && !!order.advpsServiceId;
 
-    if (isAdvps && order.advpsServiceId) {
-      advpsApi = new AdvpsAPI();
+    if (isAdvps) {
+      // Proxy all ADVPS actions through oceanlinux
+      try {
+        const proxyResult = await proxyAdvpsAction(orderId!, action);
+        if (action === "status") {
+          return NextResponse.json(proxyResult);
+        }
+        return NextResponse.json({ success: true, result: proxyResult.result || proxyResult });
+      } catch (e: any) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+      }
     } else if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();
     } else if (order.provider === "hostycare" || !order.provider) {
@@ -131,10 +157,7 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "start":
-        if (advpsApi) {
-          const apiRes = await advpsApi.start(order.advpsServiceId);
-          result = { success: true, message: "Start command sent", apiResponse: apiRes };
-        } else if (smartvpsApi) {
+        if (smartvpsApi) {
           const apiRes = await smartvpsApi.start(ipAddress);
           result = { success: true, message: "Start command sent", apiResponse: apiRes };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -146,10 +169,7 @@ export async function POST(request: NextRequest) {
         break;
 
       case "stop":
-        if (advpsApi) {
-          const apiRes = await advpsApi.stop(order.advpsServiceId);
-          result = { success: true, message: "Stop command sent", apiResponse: apiRes };
-        } else if (smartvpsApi) {
+        if (smartvpsApi) {
           const apiRes = await smartvpsApi.stop(ipAddress);
           result = { success: true, message: "Stop command sent", apiResponse: apiRes };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -161,10 +181,7 @@ export async function POST(request: NextRequest) {
         break;
 
       case "restart":
-        if (advpsApi) {
-          const apiRes = await advpsApi.reboot(order.advpsServiceId);
-          result = { success: true, message: "Restart command sent", apiResponse: apiRes };
-        } else if (smartvpsApi) {
+        if (smartvpsApi) {
           await smartvpsApi.stop(ipAddress);
           await new Promise((r) => setTimeout(r, 2000));
           const apiRes = await smartvpsApi.start(ipAddress);
@@ -178,22 +195,6 @@ export async function POST(request: NextRequest) {
         break;
 
       case "status": {
-        if (advpsApi) {
-          try {
-            const apiRes = await advpsApi.status(order.advpsServiceId);
-            let powerState = "unknown";
-            const runSt = apiRes?.data?.vmStatus?.status || apiRes?.data?.runningStatus || "";
-            if (typeof runSt === "string") {
-              const sl = runSt.toLowerCase();
-              if (["running", "online", "started", "active"].includes(sl)) powerState = "running";
-              else if (["stopped", "offline", "shutdown"].includes(sl)) powerState = "stopped";
-              else powerState = sl;
-            }
-            return NextResponse.json({ success: true, powerState, rawStatus: apiRes?.data, provider: "advps", lastSync: new Date().toISOString() });
-          } catch (e: any) {
-            return NextResponse.json({ success: false, error: e.message, powerState: "unknown", provider: "advps" });
-          }
-        }
         if (smartvpsApi) {
           try {
             const apiRes = await smartvpsApi.status(ipAddress);
@@ -254,33 +255,7 @@ export async function POST(request: NextRequest) {
       }
 
       case "format":
-        if (advpsApi) {
-          const os = body.os || body.osType || payload?.os || order.os || "ubuntu-22.04";
-          const apiRes = await advpsApi.rebuild(order.advpsServiceId, os);
-          if (apiRes?.data?.taskId) {
-            let taskDone = false;
-            for (let i = 0; i < 20; i++) {
-              await new Promise((r) => setTimeout(r, 5000));
-              try {
-                const taskRes = await advpsApi.taskStatus(apiRes.data.taskId);
-                if (taskRes?.data?.status === "COMPLETED") { taskDone = true; break; }
-                if (taskRes?.data?.status === "FAILED") break;
-              } catch {}
-            }
-            if (taskDone) {
-              await new Promise((r) => setTimeout(r, 10000));
-              try {
-                const pwdRes = await advpsApi.generatePassword(order.advpsServiceId);
-                const pwd = pwdRes?.data?.password || pwdRes?.data?.newPassword || pwdRes?.data?.existingPassword;
-                if (pwd) {
-                  await Order.findByIdAndUpdate(orderId, { $set: { password: pwd, lastAction: "format", lastActionTime: new Date() } });
-                  return NextResponse.json({ success: true, result: { accepted: true, message: "Rebuild complete, new password set", newPassword: pwd } });
-                }
-              } catch {}
-            }
-          }
-          result = { success: true, message: "Rebuild command sent", apiResponse: apiRes };
-        } else if (smartvpsApi) {
+        if (smartvpsApi) {
           const apiRes = await smartvpsApi.format(ipAddress);
           result = { success: true, message: "Format command sent", apiResponse: apiRes };
         } else {
