@@ -134,7 +134,7 @@ export default function DashboardPage() {
   }, []);
 
   const fetchTemplates = useCallback(async () => {
-    if (!order || order.provider === "smartvps" || order.provider === "advps") return;
+    if (!order || order.provider === "smartvps") return;
     setTemplatesLoading(true);
     try {
       const res = await fetch("/api/server/action", {
@@ -491,22 +491,22 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Format */}
-              {(isSmartVps || isAdvps) && (
+              {/* Format - SmartVPS only (ADVPS uses the Reinstall section below) */}
+              {isSmartVps && (
                 <div>
-                  <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">{isAdvps ? "Rebuild Server" : "Format Server"}</h3>
+                  <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Format Server</h3>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button className="bg-red-600 hover:bg-red-700 text-white border-0" disabled={actionLoading !== null}>
                         {actionLoading === "format" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                        {isAdvps ? "Rebuild Server" : "Format Server"}
+                        Format Server
                       </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent className="bg-zinc-900 border-zinc-800">
                       <AlertDialogHeader>
                         <AlertDialogTitle className="flex items-center gap-2 text-white">
                           <AlertTriangle className="h-5 w-5 text-red-500" />
-                          {isAdvps ? "Rebuild Server" : "Format Server"}
+                          Format Server
                         </AlertDialogTitle>
                         <AlertDialogDescription className="text-zinc-400">
                           This will erase all data and reset to factory state. Cannot be undone.
@@ -515,7 +515,7 @@ export default function DashboardPage() {
                       <AlertDialogFooter>
                         <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">Cancel</AlertDialogCancel>
                         <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={() => performAction("format")}>
-                          {isAdvps ? "Rebuild" : "Format"}
+                          Format
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
@@ -523,98 +523,67 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Reinstall */}
-              {!isAdvps && (
+              {/* Reinstall / Rebuild */}
+              {!isSmartVps && (
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
-                  {isSmartVps ? "Change OS" : "Reinstall OS"}
+                  {isAdvps ? "Rebuild Server" : "Reinstall OS"}
                 </h3>
 
-                {isSmartVps ? (
-                  <div className="space-y-3 max-w-md">
-                    <Select value={selectedOs} onValueChange={setSelectedOs}>
-                      <SelectTrigger className="bg-zinc-900 border-zinc-700 text-zinc-200">
-                        <SelectValue placeholder="Select operating system" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-zinc-900 border-zinc-700">
-                        {smartvpsOsOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value} className="text-zinc-200 focus:bg-zinc-800 focus:text-white">
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" disabled={!selectedOs || actionLoading !== null}
-                          className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
-                          <HardDrive className="mr-2 h-4 w-4" />Change OS
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="bg-zinc-900 border-zinc-800">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle className="flex items-center gap-2 text-white">
-                            <AlertTriangle className="h-5 w-5 text-red-500" />Change OS
-                          </AlertDialogTitle>
-                          <AlertDialogDescription className="text-zinc-400">All data will be lost. Are you sure?</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300">Cancel</AlertDialogCancel>
-                          <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={handleReinstall}>Change OS</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                ) : (
-                  <div className="space-y-3 max-w-md">
-                    <Button variant="outline" size="sm" onClick={fetchTemplates} disabled={templatesLoading}
-                      className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 mb-1">
-                      {templatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                      Format
-                    </Button>
+                <div className="space-y-3 max-w-md">
+                  <Button variant="outline" size="sm" onClick={fetchTemplates} disabled={templatesLoading}
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 mb-1">
+                    {templatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    {isAdvps ? "Load OS Options" : "Load Templates"}
+                  </Button>
 
-                    {Object.keys(templates).length > 0 && (
-                      <>
-                        <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
-                          <SelectTrigger className="bg-zinc-900 border-zinc-700 text-zinc-200">
-                            <SelectValue placeholder="Select OS template" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-900 border-zinc-700 max-h-60">
-                            {Object.entries(templates).map(([id, name]) => (
-                              <SelectItem key={id} value={id} className="text-zinc-200 focus:bg-zinc-800 focus:text-white">{name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                  {Object.keys(templates).length > 0 && (
+                    <>
+                      <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                        <SelectTrigger className="bg-zinc-900 border-zinc-700 text-zinc-200">
+                          <SelectValue placeholder="Select operating system" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-900 border-zinc-700 max-h-60">
+                          {Object.entries(templates).map(([id, name]) => (
+                            <SelectItem key={id} value={id} className="text-zinc-200 focus:bg-zinc-800 focus:text-white">{name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!isAdvps && (
                         <div className="space-y-1.5">
                           <Label htmlFor="reinstallPwd" className="text-xs text-zinc-400">New Password (optional)</Label>
                           <Input id="reinstallPwd" type="text" placeholder="Auto-generated if empty"
                             value={reinstallPassword} onChange={(e) => setReinstallPassword(e.target.value)}
                             className="bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-600" />
                         </div>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" disabled={!selectedTemplate || actionLoading !== null}
-                              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
-                              <HardDrive className="mr-2 h-4 w-4" />Reinstall OS
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent className="bg-zinc-900 border-zinc-800">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2 text-white">
-                                <AlertTriangle className="h-5 w-5 text-red-500" />Reinstall OS
-                              </AlertDialogTitle>
-                              <AlertDialogDescription className="text-zinc-400">All data will be wiped. Cannot be undone.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300">Cancel</AlertDialogCancel>
-                              <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={handleReinstall}>Reinstall</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </>
-                    )}
-                  </div>
-                )}
+                      )}
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" disabled={!selectedTemplate || actionLoading !== null}
+                            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
+                            <HardDrive className="mr-2 h-4 w-4" />{isAdvps ? "Rebuild Server" : "Reinstall OS"}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="bg-zinc-900 border-zinc-800">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle className="flex items-center gap-2 text-white">
+                              <AlertTriangle className="h-5 w-5 text-red-500" />{isAdvps ? "Rebuild Server" : "Reinstall OS"}
+                            </AlertDialogTitle>
+                            <AlertDialogDescription className="text-zinc-400">
+                              All data will be erased and the server will be rebuilt with the selected OS. This cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300">Cancel</AlertDialogCancel>
+                            <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={isAdvps ? () => performAction("format", { payload: { templateId: selectedTemplate } }) : handleReinstall}>
+                              {isAdvps ? "Rebuild" : "Reinstall"}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </>
+                  )}
+                </div>
               </div>
               )}
             </>

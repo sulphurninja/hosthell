@@ -10,14 +10,14 @@ import { VirtualizorAPI } from "@/services/virtualizorApi";
 const OCEANLINUX_URL = process.env.NEXT_PUBLIC_OCEANLINUX_URL || "https://oceanlinux.com";
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || "";
 
-async function proxyAdvpsAction(orderId: string, action: string) {
+async function proxyAdvpsAction(orderId: string, action: string, payload?: any) {
   const res = await fetch(`${OCEANLINUX_URL}/api/internal/advps-action`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-internal-key": INTERNAL_API_KEY,
     },
-    body: JSON.stringify({ orderId, action }),
+    body: JSON.stringify({ orderId, action, payload }),
     cache: "no-store",
   });
   const data = await res.json();
@@ -138,7 +138,10 @@ export async function POST(request: NextRequest) {
     if (isAdvps) {
       // Proxy all ADVPS actions through oceanlinux
       try {
-        const proxyResult = await proxyAdvpsAction(orderId!, action);
+        const proxyResult = await proxyAdvpsAction(orderId!, action, payload || { templateId: templateId, os: body.os || body.osType });
+        if (action === "templates") {
+          return NextResponse.json(proxyResult);
+        }
         if (action === "status") {
           return NextResponse.json(proxyResult);
         }
