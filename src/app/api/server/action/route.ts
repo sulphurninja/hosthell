@@ -20,11 +20,56 @@ async function proxyAdvpsAction(orderId: string, action: string, payload?: any) 
     body: JSON.stringify({ orderId, action, payload }),
     cache: "no-store",
   });
-  const data = await res.json();
-  if (!res.ok && !data.success) {
-    throw new Error(data.error || `Proxy ADVPS action failed: ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(
+      (data as any).message || (data as any).error || `Proxy ADVPS action failed: ${res.status}`
+    ) as Error & { status?: number; data?: any };
+    (err as any).status = res.status;
+    (err as any).data = data;
+    throw err;
   }
   return data;
+}
+
+/** Match oceanlinux internal ADVPS power parsing when top-level powerState is missing. */
+function normalizeAdvpsPowerFromRaw(raw: any): string {
+  if (!raw || typeof raw !== "object") return "unknown";
+  const vmSt =
+    raw.vmStatus?.status ||
+    raw.runningStatus ||
+    raw.service?.runningStatus ||
+    raw.service?.status ||
+    raw.service?.vmStatus?.status ||
+    "";
+  if (typeof vmSt !== "string" || !vmSt) return "unknown";
+  const sl = vmSt.toLowerCase();
+  if (["running", "online", "started", "active"].includes(sl)) return "running";
+  if (["stopped", "offline", "shutdown"].includes(sl)) return "stopped";
+  if (["suspended", "paused"].includes(sl)) return "suspended";
+  return sl;
+}
+
+function pickAdvpsOrderSyncFields(remote: Record<string, unknown>) {
+  const keys = [
+    "ipAddress",
+    "username",
+    "password",
+    "os",
+    "provisioningStatus",
+    "provisioningError",
+    "lastSyncTime",
+    "advpsRebuildCount",
+    "advpsRebuildCountMonth",
+    "status",
+    "advpsOrderId",
+  ] as const;
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = remote[k];
+    if (v !== undefined && v !== null) out[k] = v;
+  }
+  return out;
 }
 
 function generateSecurePassword() {
@@ -136,18 +181,48 @@ export async function POST(request: NextRequest) {
       && !!order.advpsServiceId;
 
     if (isAdvps) {
-      // Proxy all ADVPS actions through oceanlinux
       try {
-        const proxyResult = await proxyAdvpsAction(orderId!, action, payload || { templateId: templateId, os: body.os || body.osType });
+        const proxyResult = await proxyAdvpsAction(
+          orderId!,
+          action,
+          payload || { templateId: templateId, os: body.os || body.osType }
+        );
         if (action === "templates") {
           return NextResponse.json(proxyResult);
         }
-        if (action === "status") {
-          return NextResponse.json(proxyResult);
+
+        if (action === "status" || action === "sync") {
+          let powerState = (proxyResult as any).powerState || "unknown";
+          if (powerState === "unknown" && (proxyResult as any).rawStatus) {
+            powerState = normalizeAdvpsPowerFromRaw((proxyResult as any).rawStatus);
+          }
+
+          if (action === "sync" && (proxyResult as any).order) {
+            const patch = pickAdvpsOrderSyncFields((proxyResult as any).order as any);
+            if (Object.keys(patch).length > 0) {
+              await Order.findByIdAndUpdate(orderId, { $set: patch });
+            }
+          }
+
+          return NextResponse.json({
+            ...(proxyResult as object),
+            success: (proxyResult as any).success !== false,
+            powerState,
+          });
         }
-        return NextResponse.json({ success: true, result: proxyResult.result || proxyResult });
+
+        return NextResponse.json({ success: true, result: (proxyResult as any).result || proxyResult });
       } catch (e: any) {
-        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+        const status = typeof e.status === "number" ? e.status : 500;
+        return NextResponse.json(
+          {
+            success: false,
+            error: e.message,
+            code: e.data?.code,
+            message: e.data?.message,
+          },
+          { status }
+        );
       }
     } else if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();

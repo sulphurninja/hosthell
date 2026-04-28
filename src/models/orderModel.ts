@@ -19,7 +19,6 @@ const orderSchema = new mongoose.Schema(
     password: { type: String, default: "" },
     os: {
       type: String,
-      enum: ["CentOS 7", "Ubuntu 22", "Windows 2022 64"],
       default: "Ubuntu 22",
     },
     clientTxnId: { type: String, required: true, unique: true },
@@ -41,6 +40,9 @@ const orderSchema = new mongoose.Schema(
     smartvpsProductId: { type: String },
     advpsServiceId: { type: String },
     advpsProductId: { type: String },
+    advpsOrderId: { type: String },
+    advpsRebuildCount: { type: Number, default: 0 },
+    advpsRebuildCountMonth: { type: String, default: "" },
     provisioningStatus: {
       type: String,
       enum: ["pending", "provisioning", "active", "failed", "suspended", "terminated"],

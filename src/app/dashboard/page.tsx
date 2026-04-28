@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -69,11 +69,16 @@ interface OrderData {
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  advpsOrderId?: string;
+  advpsRebuildCount?: number;
+  advpsRebuildCountMonth?: string;
   slotIpPackageId?: string;
   provisioningStatus: string;
+  provisioningError?: string;
   status: string;
   lastAction?: string;
   lastActionTime?: string;
+  lastSyncTime?: string;
   panelUsername?: string;
 }
 
@@ -91,6 +96,8 @@ export default function DashboardPage() {
   const [reinstallPassword, setReinstallPassword] = useState("");
   const [pendingRequest, setPendingRequest] = useState<any>(null);
   const [requestLoading, setRequestLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const orderRef = useRef<OrderData | null>(null);
 
   const smartvpsOsOptions = [
     { value: "ubuntu", label: "Ubuntu" },
@@ -125,13 +132,78 @@ export default function DashboardPage() {
         body: JSON.stringify({ action: "status" }),
       });
       const data = await res.json();
-      if (data.powerState) setPowerState(data.powerState);
+      let ps = data.powerState || "unknown";
+      if (ps === "unknown" && data.rawStatus) {
+        const raw = data.rawStatus;
+        const vmSt =
+          raw.vmStatus?.status ||
+          raw.runningStatus ||
+          raw.service?.runningStatus ||
+          raw.service?.status ||
+          "";
+        if (typeof vmSt === "string" && vmSt) {
+          const sl = vmSt.toLowerCase();
+          if (["running", "online", "started", "active"].includes(sl)) ps = "running";
+          else if (["stopped", "offline", "shutdown"].includes(sl)) ps = "stopped";
+          else if (["suspended", "paused"].includes(sl)) ps = "suspended";
+          else ps = sl;
+        }
+      }
+      setPowerState(ps);
     } catch {
       setPowerState("unknown");
     } finally {
       setStatusLoading(false);
     }
   }, []);
+
+  /** ADVPS: full sync via OceanLinux (status + getOrderDetails → same as oceanlinux order page). */
+  const fetchAdvpsSync = useCallback(async () => {
+    setSyncLoading(true);
+    setStatusLoading(true);
+    try {
+      const res = await fetch("/api/server/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        toast.error(data.message || data.error || "Sync failed");
+        return;
+      }
+      let ps = data.powerState || "unknown";
+      if (ps === "unknown" && data.rawStatus) {
+        const raw = data.rawStatus;
+        const vmSt =
+          raw.vmStatus?.status ||
+          raw.runningStatus ||
+          raw.service?.runningStatus ||
+          raw.service?.status ||
+          "";
+        if (typeof vmSt === "string" && vmSt) {
+          const sl = vmSt.toLowerCase();
+          if (["running", "online", "started", "active"].includes(sl)) ps = "running";
+          else if (["stopped", "offline", "shutdown"].includes(sl)) ps = "stopped";
+          else if (["suspended", "paused"].includes(sl)) ps = "suspended";
+          else ps = sl;
+        }
+      }
+      setPowerState(ps);
+      if (data.result?.credentialsUpdated) {
+        toast.success("Synced — credentials updated from ADVPS");
+      } else {
+        toast.success("Synced with ADVPS");
+      }
+      await fetchOrder();
+    } catch {
+      toast.error("Sync failed");
+      setPowerState("unknown");
+    } finally {
+      setSyncLoading(false);
+      setStatusLoading(false);
+    }
+  }, [fetchOrder]);
 
   const fetchTemplates = useCallback(async () => {
     if (!order || order.provider === "smartvps") return;
@@ -203,6 +275,9 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchOrder(); }, [fetchOrder]);
   useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
+  useEffect(() => {
     if (order) {
       if (isAutoProvisioned(order)) {
         fetchStatus();
@@ -221,12 +296,19 @@ export default function DashboardPage() {
         body: JSON.stringify({ action, ...extraPayload }),
       });
       const data = await res.json();
-      if (data.success) {
-        toast.success(data.result?.message || `${action} command sent`);
-        setTimeout(fetchStatus, 3000);
-      } else {
-        toast.error(data.error || `${action} failed`);
+      if (!res.ok || data.success === false) {
+        toast.error(data.message || data.error || `${action} failed`);
+        return;
       }
+      toast.success(data.result?.message || `${action} command sent`);
+      setTimeout(() => {
+        const o = orderRef.current;
+        if (o?.provider === "advps" || o?.advpsServiceId) {
+          fetchAdvpsSync();
+        } else {
+          fetchStatus();
+        }
+      }, 3000);
     } catch {
       toast.error(`${action} failed`);
     } finally {
@@ -264,6 +346,37 @@ export default function DashboardPage() {
     }
   };
 
+  /** ADVPS: match oceanlinux — show provisioning lifecycle, then VM power (Online/Offline). */
+  const getAdvpsStatusBadges = () => {
+    const prov = (order?.provisioningStatus || "").toLowerCase();
+    const power = getPowerBadge();
+    if (prov === "provisioning") {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Provisioning</Badge>
+          {power}
+        </div>
+      );
+    }
+    if (prov === "failed") {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-red-500/10 text-red-400 border border-red-500/20 font-medium">Failed</Badge>
+          {power}
+        </div>
+      );
+    }
+    if (prov === "pending") {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Pending</Badge>
+          {power}
+        </div>
+      );
+    }
+    return power;
+  };
+
   const getOrderStatusBadge = () => {
     const s = order?.status?.toLowerCase() || "";
     if (s === "active")
@@ -292,6 +405,11 @@ export default function DashboardPage() {
   const isSmartVps = order.provider === "smartvps";
   const isAdvps = order.provider === "advps" || !!order.advpsServiceId;
   const isManual = !isAutoProvisioned(order);
+  const advpsRebuildMonth = new Date().toISOString().slice(0, 7);
+  const advpsRebuildsUsed =
+    order.advpsRebuildCountMonth === advpsRebuildMonth ? order.advpsRebuildCount ?? 0 : 0;
+  const advpsRebuildsRemaining = Math.max(0, 10 - advpsRebuildsUsed);
+  const advpsRebuildLocked = isAdvps && advpsRebuildsRemaining === 0;
   const daysLeft = order.expiryDate
     ? Math.ceil((new Date(order.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null;
@@ -324,8 +442,16 @@ export default function DashboardPage() {
             <Power className="h-4 w-4 text-zinc-500 mt-0.5" />
             <div className="min-w-0">
               <p className="text-[11px] text-zinc-500 uppercase tracking-wider">Status</p>
-              <div className="flex items-center gap-2 mt-1">
-                {statusLoading ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400" /> : isManual ? getOrderStatusBadge() : getPowerBadge()}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {statusLoading || syncLoading ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+                ) : isManual ? (
+                  getOrderStatusBadge()
+                ) : isAdvps ? (
+                  getAdvpsStatusBadges()
+                ) : (
+                  getPowerBadge()
+                )}
               </div>
             </div>
           </div>
@@ -483,9 +609,17 @@ export default function DashboardPage() {
                     {actionLoading === "restart" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
                     Restart
                   </Button>
-                  <Button variant="outline" onClick={fetchStatus} disabled={statusLoading}
-                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600">
-                    {statusLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  <Button
+                    variant="outline"
+                    onClick={isAdvps ? fetchAdvpsSync : fetchStatus}
+                    disabled={statusLoading || syncLoading}
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
+                  >
+                    {statusLoading || syncLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
                     Sync
                   </Button>
                 </div>
@@ -531,6 +665,28 @@ export default function DashboardPage() {
                 </h3>
 
                 <div className="space-y-3 max-w-md">
+                  {isAdvps && (
+                    <div
+                      className={`text-xs px-2.5 py-2 rounded-md border ${
+                        advpsRebuildLocked
+                          ? "bg-red-500/10 text-red-300 border-red-500/25"
+                          : "bg-zinc-900/80 text-zinc-400 border-zinc-700"
+                      }`}
+                    >
+                      <p className="font-medium text-zinc-200 mb-0.5">ADVPS rebuild limit</p>
+                      <p>
+                        <span className="tabular-nums font-semibold text-zinc-100">{advpsRebuildsUsed}/10</span> rebuilds
+                        used this month — {advpsRebuildsRemaining} remaining. Resets on the 1st.
+                      </p>
+                      {advpsRebuildLocked && (
+                        <p className="text-red-300 mt-1">Monthly limit reached. Rebuild is disabled until next month.</p>
+                      )}
+                      <p className="text-zinc-500 mt-1.5">
+                        After a rebuild, a new password is created via ADVPS; use <strong>Sync</strong> if it does not appear yet.
+                      </p>
+                    </div>
+                  )}
+
                   <Button variant="outline" size="sm" onClick={fetchTemplates} disabled={templatesLoading}
                     className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 mb-1">
                     {templatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
@@ -559,9 +715,13 @@ export default function DashboardPage() {
                       )}
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="outline" disabled={!selectedTemplate || actionLoading !== null}
-                            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
-                            <HardDrive className="mr-2 h-4 w-4" />{isAdvps ? "Rebuild Server" : "Reinstall OS"}
+                          <Button
+                            variant="outline"
+                            disabled={!selectedTemplate || actionLoading !== null || advpsRebuildLocked}
+                            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                          >
+                            <HardDrive className="mr-2 h-4 w-4" />
+                            {isAdvps ? `Rebuild Server${advpsRebuildLocked ? "" : ` (${advpsRebuildsRemaining} left)`}` : "Reinstall OS"}
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent className="bg-zinc-900 border-zinc-800">
