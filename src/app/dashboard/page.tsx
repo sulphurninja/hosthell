@@ -297,10 +297,24 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (!res.ok || data.success === false) {
+        if (action === "resetmac" && (res.status === 429 || data.code === "MAC_RESET_RATE_LIMIT")) {
+          toast.error("MAC reset is limited to once every 24 hours without an active subscription.");
+          return;
+        }
         toast.error(data.message || data.error || `${action} failed`);
         return;
       }
-      toast.success(data.result?.message || `${action} command sent`);
+      if (action === "resetmac") {
+        const oldMac = data.result?.oldMacAddress;
+        const newMac = data.result?.newMacAddress;
+        if (oldMac && newMac) {
+          toast.success(`MAC address updated: ${oldMac} -> ${newMac}`);
+        } else {
+          toast.success("MAC address reset successfully");
+        }
+      } else {
+        toast.success(data.result?.message || `${action} command sent`);
+      }
       setTimeout(() => {
         const o = orderRef.current;
         if (o?.provider === "advps" || o?.advpsServiceId) {
@@ -622,6 +636,47 @@ export default function DashboardPage() {
                     )}
                     Sync
                   </Button>
+                  {isAdvps && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          disabled={actionLoading !== null}
+                          className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
+                        >
+                          {actionLoading === "resetmac" ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Network className="mr-2 h-4 w-4" />
+                          )}
+                          Reset MAC
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-zinc-900 border-zinc-800">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2 text-white">
+                            <AlertTriangle className="h-5 w-5 text-amber-500" />
+                            Reset MAC Address
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="text-zinc-400">
+                            ADVPS will generate and apply a new MAC address for this VPS service.
+                            Without an active MAC reset subscription, this action is limited to once every 24 hours.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">
+                            Cancel
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-red-600 text-white hover:bg-red-700"
+                            onClick={() => performAction("resetmac")}
+                          >
+                            Reset MAC
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
                 </div>
               </div>
 
