@@ -228,7 +228,15 @@ export default function DashboardPage() {
     return !!(
       (o.provider === "hostycare" && o.hostycareServiceId) ||
       (o.provider === "smartvps" && (o.smartvpsServiceId || o.ipAddress)) ||
-      (o.provider === "advps" && o.advpsServiceId)
+      (o.provider === "advps" && o.advpsServiceId) ||
+      // Company-Virtualizor / OceanLinux-managed orders: once credentials
+      // have been delivered (IP + username + password) we let the panel
+      // attempt direct power controls. The /api/server/action route will
+      // dispatch to the company's Virtualizor automation when configured;
+      // if not, the user can still fall back to the manual-request flow.
+      (!!o.ipAddress && !!o.username && !!o.password && !o.hostycareServiceId &&
+        !o.smartvpsServiceId && !o.advpsServiceId && o.provider !== "smartvps" &&
+        o.provider !== "advps")
     );
   }, []);
 
