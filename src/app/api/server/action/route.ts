@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import Order from "@/models/orderModel";
 import { execSync } from "child_process";
+import {
+  isAdvpsOrder,
+  isSmartVpsOrder,
+  shouldProxyServiceActionToOceanlinux,
+} from "@/lib/orderAutomation";
 
 const HostycareAPI = require("@/services/hostycareApi");
 const SmartVpsAPI = require("@/services/smartvpsApi");
@@ -10,21 +15,52 @@ import { VirtualizorAPI } from "@/services/virtualizorApi";
 const OCEANLINUX_URL = process.env.NEXT_PUBLIC_OCEANLINUX_URL || "https://oceanlinux.com";
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || "";
 
-async function proxyAdvpsAction(orderId: string, action: string, payload?: any) {
-  const res = await fetch(`${OCEANLINUX_URL}/api/internal/advps-action`, {
+async function proxyOceanlinuxInternal(
+  path: string,
+  body: Record<string, unknown>
+) {
+  const res = await fetch(`${OCEANLINUX_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-internal-key": INTERNAL_API_KEY,
     },
-    body: JSON.stringify({ orderId, action, payload }),
+    body: JSON.stringify(body),
     cache: "no-store",
   });
   const data = await res.json();
-  if (!res.ok && !data.success) {
-    throw new Error(data.error || `Proxy ADVPS action failed: ${res.status}`);
+  if (!res.ok && data.success === false) {
+    throw new Error(data.error || `OceanLinux proxy failed: ${res.status}`);
   }
   return data;
+}
+
+async function proxyAdvpsAction(orderId: string, action: string, payload?: any) {
+  return proxyOceanlinuxInternal("/api/internal/advps-action", {
+    orderId,
+    action,
+    payload,
+  });
+}
+
+/**
+ * Company Virtualizor / Reseller API / Netbay (and other OceanLinux-side
+ * automation) — same handler as /dashboard/order/[id] on oceanlinux.com.
+ */
+async function proxyOceanlinuxServiceAction(
+  orderId: string,
+  action: string,
+  extra?: { templateId?: string; newPassword?: string; payload?: any; os?: string; osType?: string }
+) {
+  return proxyOceanlinuxInternal("/api/internal/service-action", {
+    orderId,
+    action,
+    templateId: extra?.templateId,
+    newPassword: extra?.newPassword,
+    payload: extra?.payload,
+    os: extra?.os,
+    osType: extra?.osType,
+  });
 }
 
 function generateSecurePassword() {
@@ -117,6 +153,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 });
     }
 
+    const orderPlain = order.toObject ? order.toObject() : order;
+
+    // ---- OceanLinux automation (company Virtualizor / Reseller / Netbay) ----
+    if (shouldProxyServiceActionToOceanlinux(orderPlain)) {
+      try {
+        const proxyResult = await proxyOceanlinuxServiceAction(orderId!, action, {
+          templateId,
+          newPassword,
+          payload: payload || { templateId, os: body.os || body.osType },
+          os: body.os,
+          osType: body.osType,
+        });
+        // Pass through status/templates/reinstall responses unchanged
+        if (action === "status" || action === "sync" || action === "templates") {
+          return NextResponse.json(proxyResult);
+        }
+        return NextResponse.json({
+          success: proxyResult.success !== false,
+          result: proxyResult.result || proxyResult,
+          ...(proxyResult.powerState ? { powerState: proxyResult.powerState } : {}),
+        });
+      } catch (e: any) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+      }
+    }
+
     let ipAddress = order.ipAddress || order.serverDetails?.rawDetails?.ips?.[0] || null;
     if (!ipAddress) {
       return NextResponse.json({ success: false, error: "No IP address found" }, { status: 400 });
@@ -127,13 +189,8 @@ export async function POST(request: NextRequest) {
     let hostycareApi: any = null;
     let smartvpsApi: any = null;
 
-    const isSmartVps =
-      order.provider === "smartvps" ||
-      (order.productName && order.productName.includes("🌊"));
-
-    const isAdvps =
-      (order.provider === "advps" || order.advpsServiceId || (order.productName && order.productName.includes("⚡")))
-      && !!order.advpsServiceId;
+    const isSmartVps = isSmartVpsOrder(orderPlain);
+    const isAdvps = isAdvpsOrder(orderPlain) && !!order.advpsServiceId;
 
     if (isAdvps) {
       // Proxy all ADVPS actions through oceanlinux

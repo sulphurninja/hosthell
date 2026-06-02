@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { isDirectServerControlOrder } from "@/lib/orderAutomation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,6 +70,9 @@ interface OrderData {
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  netbayServiceId?: string;
+  ipStockId?: string;
+  autoProvisioned?: boolean;
   slotIpPackageId?: string;
   provisioningStatus: string;
   status: string;
@@ -152,12 +156,7 @@ export default function DashboardPage() {
   }, [order]);
 
   const isAutoProvisioned = useCallback((o: OrderData | null) => {
-    if (!o) return false;
-    return !!(
-      (o.provider === "hostycare" && o.hostycareServiceId) ||
-      (o.provider === "smartvps" && (o.smartvpsServiceId || o.ipAddress)) ||
-      (o.provider === "advps" && o.advpsServiceId)
-    );
+    return isDirectServerControlOrder(o);
   }, []);
 
   const fetchPendingRequest = useCallback(async () => {

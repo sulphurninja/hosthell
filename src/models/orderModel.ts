@@ -32,7 +32,7 @@ const orderSchema = new mongoose.Schema(
     webhookCustomerEmail: { type: String },
     provider: {
       type: String,
-      enum: ["hostycare", "smartvps", "slotip", "advps"],
+      enum: ["hostycare", "smartvps", "slotip", "advps", "netbay"],
       default: "hostycare",
     },
     hostycareServiceId: { type: String },
@@ -41,6 +41,10 @@ const orderSchema = new mongoose.Schema(
     smartvpsProductId: { type: String },
     advpsServiceId: { type: String },
     advpsProductId: { type: String },
+    netbayServiceId: { type: String },
+    netbayPlanId: { type: String },
+    netbayTaskId: { type: String },
+    netbayGroupTag: { type: String },
     provisioningStatus: {
       type: String,
       enum: ["pending", "provisioning", "active", "failed", "suspended", "terminated"],
