@@ -221,7 +221,7 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success && data.result) setTemplates(data.result);
     } catch {
-      toast.error("Failed to load templates");
+      toast.error("Failed to load format options");
     } finally {
       setTemplatesLoading(false);
     }
@@ -711,11 +711,11 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Reinstall / Rebuild */}
+              {/* Format / Rebuild */}
               {!isSmartVps && (
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
-                  {isAdvps ? "Rebuild Server" : "Reinstall OS"}
+                  {isAdvps ? "Rebuild Server" : "Format Server"}
                 </h3>
 
                 <div className="space-y-3 max-w-md">
@@ -744,7 +744,7 @@ export default function DashboardPage() {
                   <Button variant="outline" size="sm" onClick={fetchTemplates} disabled={templatesLoading}
                     className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 mb-1">
                     {templatesLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    {isAdvps ? "Load OS Options" : "Load Templates"}
+                    {templatesLoading ? "Loading..." : "Format"}
                   </Button>
 
                   {Object.keys(templates).length > 0 && (
@@ -775,13 +775,13 @@ export default function DashboardPage() {
                             className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
                           >
                             <HardDrive className="mr-2 h-4 w-4" />
-                            {isAdvps ? `Rebuild Server${advpsRebuildLocked ? "" : ` (${advpsRebuildsRemaining} left)`}` : "Reinstall OS"}
+                            {isAdvps ? `Rebuild Server${advpsRebuildLocked ? "" : ` (${advpsRebuildsRemaining} left)`}` : "Format Server"}
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent className="bg-zinc-900 border-zinc-800">
                           <AlertDialogHeader>
                             <AlertDialogTitle className="flex items-center gap-2 text-white">
-                              <AlertTriangle className="h-5 w-5 text-red-500" />{isAdvps ? "Rebuild Server" : "Reinstall OS"}
+                              <AlertTriangle className="h-5 w-5 text-red-500" />{isAdvps ? "Rebuild Server" : "Format Server"}
                             </AlertDialogTitle>
                             <AlertDialogDescription className="text-zinc-400">
                               All data will be erased and the server will be rebuilt with the selected OS. This cannot be undone.
@@ -790,7 +790,7 @@ export default function DashboardPage() {
                           <AlertDialogFooter>
                             <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300">Cancel</AlertDialogCancel>
                             <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={isAdvps ? () => performAction("format", { payload: { templateId: selectedTemplate } }) : handleReinstall}>
-                              {isAdvps ? "Rebuild" : "Reinstall"}
+                              {isAdvps ? "Rebuild" : "Format"}
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
