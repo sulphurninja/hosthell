@@ -35,6 +35,22 @@ export function isAdvpsOrder(order: OrderAutomationFields | null | undefined): b
   return !!(order.advpsServiceId || order.provider === 'advps');
 }
 
+/** Netbay orders are proxied to OceanLinux service-action. */
+export function isNetbayOrder(order: OrderAutomationFields | null | undefined): boolean {
+  if (!order) return false;
+  return !!(order.netbayServiceId || order.provider === 'netbay');
+}
+
+export function getManageProviderLabel(order: OrderAutomationFields | null | undefined): string {
+  if (!order) return 'hostycare';
+  if (isNetbayOrder(order)) return 'netbay';
+  if (isAdvpsOrder(order)) return 'advps';
+  if (isSmartVpsOrder(order)) return 'smartvps';
+  if (shouldProxyServiceActionToOceanlinux(order)) return 'oceanlinux';
+  if (isLocalHostycareOrder(order)) return 'hostycare';
+  return order.provider || 'hostycare';
+}
+
 /**
  * Route power/reinstall actions through OceanLinux's internal service-action
  * endpoint so company Virtualizor / Reseller / Netbay automation matches

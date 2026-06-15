@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { isDirectServerControlOrder } from "@/lib/orderAutomation";
+import { isDirectServerControlOrder, getManageProviderLabel, shouldProxyServiceActionToOceanlinux } from "@/lib/orderAutomation";
+import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from "@/lib/advpsRebuildLimit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +46,7 @@ import {
   Power,
   Monitor,
   Lock,
+  KeyRound,
   User,
   Trash2,
   Flame,
@@ -161,8 +163,8 @@ export default function DashboardPage() {
     }
   }, []);
 
-  /** ADVPS: full sync via OceanLinux (status + getOrderDetails → same as oceanlinux order page). */
-  const fetchAdvpsSync = useCallback(async () => {
+  /** Full sync — status + credentials (matches oceanlinux order page). */
+  const fetchServerSync = useCallback(async () => {
     setSyncLoading(true);
     setStatusLoading(true);
     try {
@@ -194,10 +196,10 @@ export default function DashboardPage() {
         }
       }
       setPowerState(ps);
-      if (data.result?.credentialsUpdated) {
-        toast.success("Synced — credentials updated from ADVPS");
+      if (data.result?.credentialsUpdated || data.order?.password) {
+        toast.success("Synced — credentials updated");
       } else {
-        toast.success("Synced with ADVPS");
+        toast.success("Synced with server");
       }
       await fetchOrder();
     } catch {
@@ -300,6 +302,14 @@ export default function DashboardPage() {
           toast.error("MAC reset is limited to once every 24 hours without an active subscription.");
           return;
         }
+        if (res.status === 429 || data.code === "REBUILD_LIMIT_REACHED") {
+          toast.error(data.message || "Rebuild limit reached for this billing period");
+          return;
+        }
+        if (action === "generatepassword" && data.code === "PASSWORD_ALREADY_EXISTS") {
+          toast.info(data.message || "Password already exists — use Sync to refresh credentials");
+          return;
+        }
         toast.error(data.message || data.error || `${action} failed`);
         return;
       }
@@ -311,16 +321,17 @@ export default function DashboardPage() {
         } else {
           toast.success("MAC address reset successfully");
         }
+      } else if (action === "generatepassword") {
+        toast.success(data.message || "New password generated");
+        await fetchOrder();
+      } else if (action === "reinstall" || action === "format") {
+        toast.success(data.result?.message || "Format submitted — server is rebuilding");
+        await fetchOrder();
       } else {
         toast.success(data.result?.message || `${action} command sent`);
       }
       setTimeout(() => {
-        const o = orderRef.current;
-        if (o?.provider === "advps" || o?.advpsServiceId) {
-          fetchAdvpsSync();
-        } else {
-          fetchStatus();
-        }
+        fetchServerSync();
       }, 3000);
     } catch {
       toast.error(`${action} failed`);
@@ -417,12 +428,12 @@ export default function DashboardPage() {
 
   const isSmartVps = order.provider === "smartvps";
   const isAdvps = order.provider === "advps" || !!order.advpsServiceId;
+  const isProxied = shouldProxyServiceActionToOceanlinux(order);
+  const manageProvider = getManageProviderLabel(order);
   const isManual = !isAutoProvisioned(order);
-  const advpsRebuildMonth = new Date().toISOString().slice(0, 7);
-  const advpsRebuildsUsed =
-    order.advpsRebuildCountMonth === advpsRebuildMonth ? order.advpsRebuildCount ?? 0 : 0;
-  const advpsRebuildsRemaining = Math.max(0, 10 - advpsRebuildsUsed);
-  const advpsRebuildLocked = isAdvps && advpsRebuildsRemaining === 0;
+  const { count: advpsRebuildsUsed, remaining: advpsRebuildsRemaining, limitReached: advpsLimitReached } =
+    getAdvpsRebuildUsage(order);
+  const advpsRebuildLocked = isAdvps && advpsLimitReached;
   const daysLeft = order.expiryDate
     ? Math.ceil((new Date(order.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null;
@@ -436,7 +447,7 @@ export default function DashboardPage() {
           <StatItem icon={<Globe className="h-4 w-4" />} label="IP Address" value={order.ipAddress || "Pending"} onCopy={order.ipAddress ? () => cp(order.ipAddress, "IP") : undefined} />
           <StatItem icon={<Cpu className="h-4 w-4" />} label="OS" value={order.os} />
           <StatItem icon={<HardDrive className="h-4 w-4" />} label="Memory" value={order.memory} />
-          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={isManual ? "OceanLinux" : (order.provider || "hostycare")} />
+          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={isManual ? "OceanLinux" : manageProvider} />
           <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
             <Calendar className="h-4 w-4 text-zinc-500 mt-0.5" />
             <div className="min-w-0">
@@ -624,7 +635,7 @@ export default function DashboardPage() {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={isAdvps ? fetchAdvpsSync : fetchStatus}
+                    onClick={fetchServerSync}
                     disabled={statusLoading || syncLoading}
                     className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
                   >
@@ -636,7 +647,21 @@ export default function DashboardPage() {
                     Sync
                   </Button>
                   {isAdvps && (
-                    <AlertDialog>
+                    <>
+                      <Button
+                        variant="outline"
+                        disabled={actionLoading !== null}
+                        className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
+                        onClick={() => performAction("generatepassword")}
+                      >
+                        {actionLoading === "generatepassword" ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <KeyRound className="mr-2 h-4 w-4" />
+                        )}
+                        Generate Password
+                      </Button>
+                      <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
                           variant="outline"
@@ -675,6 +700,7 @@ export default function DashboardPage() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    </>
                   )}
                 </div>
               </div>
@@ -729,11 +755,11 @@ export default function DashboardPage() {
                     >
                       <p className="font-medium text-zinc-200 mb-0.5">ADVPS rebuild limit</p>
                       <p>
-                        <span className="tabular-nums font-semibold text-zinc-100">{advpsRebuildsUsed}/10</span> rebuilds
-                        used this month — {advpsRebuildsRemaining} remaining. Resets on the 1st.
+                        <span className="tabular-nums font-semibold text-zinc-100">{advpsRebuildsUsed}/{ADVPS_REBUILD_LIMIT}</span> rebuilds
+                        used this period — {advpsRebuildsRemaining} remaining. Resets when you renew or on the 1st.
                       </p>
                       {advpsRebuildLocked && (
-                        <p className="text-red-300 mt-1">Monthly limit reached. Rebuild is disabled until next month.</p>
+                        <p className="text-red-300 mt-1">Rebuild limit reached. Resets when you renew or on the 1st of next month.</p>
                       )}
                       <p className="text-zinc-500 mt-1.5">
                         After a rebuild, a new password is created via ADVPS; use <strong>Sync</strong> if it does not appear yet.

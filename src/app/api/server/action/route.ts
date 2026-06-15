@@ -10,8 +10,11 @@ import {
   shouldProxyServiceActionToOceanlinux,
 } from "@/lib/orderAutomation";
 
+export const maxDuration = 120;
+
 const HostycareAPI = require("@/services/hostycareApi");
 const SmartVpsAPI = require("@/services/smartvpsApi");
+const { formatIpAddress } = require("@/lib/ipAddressHelper");
 import { VirtualizorAPI } from "@/services/virtualizorApi";
 import {
   getCompanyVirtualizorAccounts,
@@ -206,6 +209,38 @@ function pickAdvpsOrderSyncFields(remote: Record<string, unknown>) {
   return out;
 }
 
+/** Patch Hosthell order after OceanLinux proxy sync/reinstall. */
+function pickOrderSyncFields(remote: Record<string, unknown>) {
+  const keys = [
+    "ipAddress",
+    "username",
+    "password",
+    "os",
+    "lastSyncTime",
+    "lastAction",
+    "lastActionTime",
+    "provisioningStatus",
+    "provisioningError",
+    "status",
+  ] as const;
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = remote[k];
+    if (v !== undefined && v !== null) out[k] = v;
+  }
+  return out;
+}
+
+function normalizeServiceAction(action: string, orderPlain: { provider?: string; advpsServiceId?: string; productName?: string }) {
+  if (action === "reboot") return "restart";
+  if (isAdvpsOrder(orderPlain)) {
+    return action === "rebuild" ? "format" : action;
+  }
+  if (isSmartVpsOrder(orderPlain)) return action;
+  if (action === "rebuild" || action === "format") return "reinstall";
+  return action;
+}
+
 function generateSecurePassword() {
   const length = 20;
   const lowercase = "abcdefghijklmnopqrstuvwxyz";
@@ -289,7 +324,10 @@ export async function POST(request: NextRequest) {
 
     await connectDB();
     const body = await request.json();
-    const { action, templateId, newPassword, payload } = body;
+    let { action, templateId, newPassword, payload } = body;
+    if (!action) {
+      return NextResponse.json({ success: false, error: "action is required" }, { status: 400 });
+    }
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -297,9 +335,16 @@ export async function POST(request: NextRequest) {
     }
 
     const orderPlain = order.toObject ? order.toObject() : order;
+    action = normalizeServiceAction(String(action), orderPlain);
 
     // ---- OceanLinux automation (company Virtualizor / Reseller / Netbay) ----
     if (shouldProxyServiceActionToOceanlinux(orderPlain)) {
+      if (!INTERNAL_API_KEY) {
+        return NextResponse.json(
+          { success: false, error: "Server automation is not configured (INTERNAL_API_KEY missing)" },
+          { status: 503 }
+        );
+      }
       try {
         const proxyResult = await proxyOceanlinuxServiceAction(orderId!, action, {
           templateId,
@@ -308,7 +353,27 @@ export async function POST(request: NextRequest) {
           os: body.os,
           osType: body.osType,
         });
-        // Pass through status/templates/reinstall responses unchanged
+
+        if (action === "sync" && (proxyResult as any).order) {
+          const patch = pickOrderSyncFields((proxyResult as any).order as Record<string, unknown>);
+          if (Object.keys(patch).length > 0) {
+            await Order.findByIdAndUpdate(orderId, { $set: patch });
+          }
+        }
+
+        if (action === "reinstall" && (proxyResult as any).result?.newPassword) {
+          const r = (proxyResult as any).result;
+          await Order.findByIdAndUpdate(orderId, {
+            $set: {
+              password: r.newPassword,
+              lastAction: "reinstall",
+              lastActionTime: new Date(),
+              ...(r.newOs ? { os: r.newOs } : {}),
+              ...(r.newUsername ? { username: r.newUsername } : {}),
+            },
+          });
+        }
+
         if (action === "status" || action === "sync" || action === "templates") {
           return NextResponse.json(proxyResult);
         }
@@ -318,7 +383,11 @@ export async function POST(request: NextRequest) {
           ...(proxyResult.powerState ? { powerState: proxyResult.powerState } : {}),
         });
       } catch (e: any) {
-        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+        const status = typeof e.status === "number" ? e.status : 500;
+        return NextResponse.json(
+          { success: false, error: e.message, code: e.data?.code, message: e.data?.message },
+          { status }
+        );
       }
     }
 
@@ -336,23 +405,30 @@ export async function POST(request: NextRequest) {
     const isAdvps = isAdvpsOrder(orderPlain) && !!order.advpsServiceId;
 
     if (isAdvps) {
+      if (!INTERNAL_API_KEY) {
+        return NextResponse.json(
+          { success: false, error: "ADVPS automation is not configured (INTERNAL_API_KEY missing)" },
+          { status: 503 }
+        );
+      }
       try {
+        const advpsAction = action === "rebuild" ? "format" : action;
         const proxyResult = await proxyAdvpsAction(
           orderId!,
-          action,
+          advpsAction,
           payload || { templateId: templateId, os: body.os || body.osType }
         );
         if (action === "templates") {
           return NextResponse.json(proxyResult);
         }
 
-        if (action === "status" || action === "sync") {
+        if (action === "status" || action === "sync" || action === "generatepassword" || action === "pullpassword") {
           let powerState = (proxyResult as any).powerState || "unknown";
           if (powerState === "unknown" && (proxyResult as any).rawStatus) {
             powerState = normalizeAdvpsPowerFromRaw((proxyResult as any).rawStatus);
           }
 
-          if (action === "sync" && (proxyResult as any).order) {
+          if ((proxyResult as any).order) {
             const patch = pickAdvpsOrderSyncFields((proxyResult as any).order as any);
             if (Object.keys(patch).length > 0) {
               await Order.findByIdAndUpdate(orderId, { $set: patch });
@@ -628,7 +704,8 @@ export async function POST(request: NextRequest) {
         }
         break;
 
-      case "status": {
+      case "status":
+      case "sync": {
         if (smartvpsApi) {
           try {
             const apiRes = await smartvpsApi.status(ipAddress);
@@ -639,6 +716,9 @@ export async function POST(request: NextRequest) {
               if (["online", "running", "active", "started", "on", "1"].includes(sl)) powerState = "running";
               else if (["offline", "stopped", "inactive", "off", "0", "shutdown"].includes(sl)) powerState = "stopped";
               else powerState = sl;
+            }
+            if (action === "sync") {
+              await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
             }
             return NextResponse.json({ success: true, powerState, rawStatus, provider: "smartvps", lastSync: new Date().toISOString() });
           } catch (e: any) {
@@ -676,6 +756,10 @@ export async function POST(request: NextRequest) {
             } else if (ipAddress) {
               const reachable = isServerReachable(ipAddress);
               powerState = reachable ? "running" : "stopped";
+            }
+
+            if (action === "sync") {
+              await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
             }
 
             return NextResponse.json({ success: true, powerState, rawStatus, serviceInfo, serviceDetails, lastSync: new Date().toISOString() });
@@ -725,8 +809,19 @@ export async function POST(request: NextRequest) {
           const pwd = providedPwd || generateSecurePassword();
           const apiRes = await virtualizorApi.reinstall(vpsid, chosenTemplateId, pwd);
 
+          const formattedIpAddress = formatIpAddress(
+            order.ipAddress || ipAddress,
+            order.provider || "hostycare",
+            order.os
+          );
+
           await Order.findByIdAndUpdate(orderId, {
-            $set: { password: pwd, lastAction: "reinstall", lastActionTime: new Date() },
+            $set: {
+              password: pwd,
+              ipAddress: formattedIpAddress,
+              lastAction: "reinstall",
+              lastActionTime: new Date(),
+            },
           });
 
           return NextResponse.json({
