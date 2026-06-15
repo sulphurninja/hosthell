@@ -40,6 +40,14 @@ const companySchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     virtualizors: { type: [companyVirtualizorSchema], default: [] },
     virtualizor: { type: legacyCompanyVirtualizorSchema, default: null },
+    resellerApi: {
+      enabled: { type: Boolean, default: false },
+      label: { type: String, default: "" },
+      baseUrl: { type: String, default: "" },
+      resellerDomain: { type: String, default: "" },
+      email: { type: String, default: "" },
+      password: { type: String, default: "" },
+    },
   },
   { timestamps: true }
 );

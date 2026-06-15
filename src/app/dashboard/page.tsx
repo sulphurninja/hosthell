@@ -3,8 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { isDirectServerControlOrder, getManageProviderLabel, shouldProxyServiceActionToOceanlinux } from "@/lib/orderAutomation";
+import { isDirectServerControlOrder, getManageProviderLabel, shouldProxyServiceActionToOceanlinux, isNetbayOrder, isSlotIpOrder } from "@/lib/orderAutomation";
+import { parseSlotIpConnection } from "@/lib/slotIpOrder";
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from "@/lib/advpsRebuildLimit";
+import type { CompanyAutomationInfo } from "@/lib/companyAutomation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +58,7 @@ import {
   CheckCircle,
   XCircle,
   Send,
+  Hash,
 } from "lucide-react";
 
 interface OrderData {
@@ -91,6 +94,7 @@ interface OrderData {
 export default function DashboardPage() {
   const router = useRouter();
   const [order, setOrder] = useState<OrderData | null>(null);
+  const [companyAutomation, setCompanyAutomation] = useState<CompanyAutomationInfo>(null);
   const [loading, setLoading] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [powerState, setPowerState] = useState<string>("unknown");
@@ -120,8 +124,10 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/auth/me");
       const data = await res.json();
-      if (data.success) setOrder(data.order);
-      else router.push("/access-server");
+      if (data.success) {
+        setOrder(data.order);
+        setCompanyAutomation(data.companyAutomation || null);
+      } else router.push("/access-server");
     } catch {
       router.push("/access-server");
     } finally {
@@ -221,9 +227,13 @@ export default function DashboardPage() {
         body: JSON.stringify({ action: "templates" }),
       });
       const data = await res.json();
-      if (data.success && data.result) setTemplates(data.result);
-    } catch {
-      toast.error("Failed to load format options");
+      if (data.success && data.result) {
+        setTemplates(data.result);
+      } else {
+        throw new Error(data.error || data.message || "Failed to load format options");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to load format options");
     } finally {
       setTemplatesLoading(false);
     }
@@ -428,9 +438,18 @@ export default function DashboardPage() {
 
   const isSmartVps = order.provider === "smartvps";
   const isAdvps = order.provider === "advps" || !!order.advpsServiceId;
+  const isSlotIp = isSlotIpOrder(order);
+  const slotIpConnection = isSlotIp ? parseSlotIpConnection(order) : null;
+  const hasConnectionDetails = isSlotIp
+    ? !!(slotIpConnection?.ip && slotIpConnection?.username)
+    : !!(order.ipAddress && order.username);
   const isProxied = shouldProxyServiceActionToOceanlinux(order);
   const manageProvider = getManageProviderLabel(order);
   const isManual = !isAutoProvisioned(order);
+  const isCompanyResellerApi = !!(companyAutomation?.enabled && companyAutomation.provider === "reseller-api");
+  const isCompanyVirtualizor = !!(companyAutomation?.enabled && companyAutomation.provider === "virtualizor");
+  const isNetbay = isNetbayOrder(order);
+  const isAutoManaged = isProxied || isNetbay || isCompanyVirtualizor || isCompanyResellerApi;
   const { count: advpsRebuildsUsed, remaining: advpsRebuildsRemaining, limitReached: advpsLimitReached } =
     getAdvpsRebuildUsage(order);
   const advpsRebuildLocked = isAdvps && advpsLimitReached;
@@ -444,10 +463,34 @@ export default function DashboardPage() {
       <HellCard icon={<Server className="h-5 w-5" />} title="Server Overview" desc="Your server details and status">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <StatItem icon={<Monitor className="h-4 w-4" />} label="Product" value={order.productName} />
-          <StatItem icon={<Globe className="h-4 w-4" />} label="IP Address" value={order.ipAddress || "Pending"} onCopy={order.ipAddress ? () => cp(order.ipAddress, "IP") : undefined} />
+          <StatItem
+            icon={<Globe className="h-4 w-4" />}
+            label="IP Address"
+            value={isSlotIp ? (slotIpConnection?.ip || "Pending") : (order.ipAddress || "Pending")}
+            onCopy={
+              isSlotIp
+                ? slotIpConnection?.ip ? () => cp(slotIpConnection.ip, "IP") : undefined
+                : order.ipAddress ? () => cp(order.ipAddress, "IP") : undefined
+            }
+          />
+          {isSlotIp && slotIpConnection?.port && (
+            <StatItem
+              icon={<Hash className="h-4 w-4" />}
+              label="Port"
+              value={slotIpConnection.port}
+              onCopy={() => cp(slotIpConnection.port, "Port")}
+            />
+          )}
           <StatItem icon={<Cpu className="h-4 w-4" />} label="OS" value={order.os} />
           <StatItem icon={<HardDrive className="h-4 w-4" />} label="Memory" value={order.memory} />
-          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={isManual ? "OceanLinux" : manageProvider} />
+          <StatItem icon={<Server className="h-4 w-4" />} label="Provider" value={
+            isSlotIp ? "Slot IP"
+              : isManual ? "OceanLinux (manual)"
+              : isCompanyVirtualizor ? `Company · Virtualizor`
+              : isCompanyResellerApi ? `Company · Reseller`
+              : isNetbay ? "Netbay"
+              : manageProvider
+          } />
           <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
             <Calendar className="h-4 w-4 text-zinc-500 mt-0.5" />
             <div className="min-w-0">
@@ -469,7 +512,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {statusLoading || syncLoading ? (
                   <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
-                ) : isManual ? (
+                ) : isSlotIp || isManual ? (
                   getOrderStatusBadge()
                 ) : isAdvps ? (
                   getAdvpsStatusBadges()
@@ -483,9 +526,51 @@ export default function DashboardPage() {
       </HellCard>
 
       {/* Connection Details */}
-      {order.ipAddress && order.username && (
-        <HellCard icon={<Network className="h-5 w-5" />} title="Connection Details" desc="Credentials to connect to your server">
+      {hasConnectionDetails && (
+        <HellCard
+          icon={<Network className="h-5 w-5" />}
+          title={isSlotIp ? "Proxy Connection Details" : "Connection Details"}
+          desc={isSlotIp ? "Use these credentials to connect to your slot IP proxy" : "Credentials to connect to your server"}
+        >
           <div className="space-y-2.5">
+            {isSlotIp && slotIpConnection ? (
+              <>
+                <CredRow icon={<Globe className="h-4 w-4" />} label="IP Address" value={slotIpConnection.ip} onCopy={() => cp(slotIpConnection.ip, "IP")} />
+                {slotIpConnection.port && (
+                  <CredRow icon={<Hash className="h-4 w-4" />} label="Port" value={slotIpConnection.port} onCopy={() => cp(slotIpConnection.port, "Port")} />
+                )}
+                <CredRow icon={<User className="h-4 w-4" />} label="Username" value={slotIpConnection.username} onCopy={() => cp(slotIpConnection.username, "Username")} />
+                <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Lock className="h-4 w-4 text-zinc-500 flex-shrink-0" />
+                    <span className="text-xs text-zinc-500">Password:</span>
+                    <code className="font-mono text-sm text-zinc-200 font-medium">
+                      {showPassword ? slotIpConnection.password : "••••••••••••"}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200" onClick={() => setShowPassword(!showPassword)}>
+                      {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200" onClick={() => cp(slotIpConnection.password, "Password")}>
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full gap-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                  onClick={() => {
+                    const proxy = `${slotIpConnection.ip}:${slotIpConnection.port}:${slotIpConnection.username}:${slotIpConnection.password}`;
+                    cp(proxy, "Proxy String");
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy Full Proxy String
+                </Button>
+              </>
+            ) : (
+              <>
             <CredRow icon={<Globe className="h-4 w-4" />} label="IP Address" value={order.ipAddress} onCopy={() => cp(order.ipAddress, "IP")} />
             <CredRow icon={<User className="h-4 w-4" />} label="Username" value={order.username} onCopy={() => cp(order.username, "Username")} />
             <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
@@ -520,11 +605,14 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
         </HellCard>
       )}
 
-      {/* Server Control */}
+      {/* Server Control — hidden for slot IP proxy orders */}
+      {!isSlotIp && (
       <div id="control" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 overflow-hidden">
         <div className="p-6 border-b border-zinc-800/80">
           <div className="flex items-center gap-2.5">
@@ -534,7 +622,11 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-base font-semibold text-white">Server Control</h2>
               <p className="text-xs text-zinc-500">
-                {isManual ? "Request server actions — admin will review and process" : "Power management and configuration"}
+                {isManual
+                  ? "Request server actions — admin will review and process"
+                  : isAutoManaged
+                    ? `Direct server management${companyAutomation?.companyName ? ` · ${companyAutomation.companyName}` : ""}`
+                    : "Power management and configuration"}
               </p>
             </div>
           </div>
@@ -741,10 +833,52 @@ export default function DashboardPage() {
               {!isSmartVps && (
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
-                  {isAdvps ? "Rebuild Server" : "Format Server"}
+                  {isAdvps ? "Rebuild Server" : isNetbay ? "Rebuild Server (Netbay)" : isCompanyVirtualizor ? "Format / Reinstall (Virtualizor)" : isCompanyResellerApi ? "Format / Reinstall" : "Format Server"}
                 </h3>
 
                 <div className="space-y-3 max-w-md">
+                  {isAutoManaged && !isAdvps && (
+                    <p className="text-xs text-zinc-500 px-1">
+                      {isNetbay && "Managed via Netbay API on OceanLinux. "}
+                      {isCompanyVirtualizor && `Managed via company Virtualizor${companyAutomation?.panelCount ? ` (${companyAutomation.panelCount} panel${companyAutomation.panelCount > 1 ? "s" : ""})` : ""}. `}
+                      {isCompanyResellerApi && "Managed via company reseller panel. "}
+                      Use <strong>Sync</strong> after format/rebuild to refresh credentials.
+                    </p>
+                  )}
+
+                  {isCompanyResellerApi && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          disabled={actionLoading !== null}
+                          className="w-full border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                        >
+                          {actionLoading === "resetmac" ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Network className="mr-2 h-4 w-4" />
+                          )}
+                          Reset MAC Address
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-zinc-900 border-zinc-800">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-white">Reset MAC Address</AlertDialogTitle>
+                          <AlertDialogDescription className="text-zinc-400">
+                            The VM will be briefly stopped to apply a new MAC, then restarted. You may need to renew DHCP inside the guest OS.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300">Cancel</AlertDialogCancel>
+                          <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={() => performAction("resetmac")}>
+                            Reset MAC
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+
                   {isAdvps && (
                     <div
                       className={`text-xs px-2.5 py-2 rounded-md border ${
@@ -830,6 +964,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

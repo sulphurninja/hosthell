@@ -5,11 +5,16 @@
  * request queue.
  */
 
+import { isSlotIpOrder } from '@/lib/slotIpOrder';
+
+export { isSlotIpOrder };
+
 export interface OrderAutomationFields {
   provider?: string;
   productName?: string;
   ipAddress?: string;
   ipStockId?: string;
+  slotIpPackageId?: string;
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
@@ -43,6 +48,7 @@ export function isNetbayOrder(order: OrderAutomationFields | null | undefined): 
 
 export function getManageProviderLabel(order: OrderAutomationFields | null | undefined): string {
   if (!order) return 'hostycare';
+  if (isSlotIpOrder(order)) return 'slotip';
   if (isNetbayOrder(order)) return 'netbay';
   if (isAdvpsOrder(order)) return 'advps';
   if (isSmartVpsOrder(order)) return 'smartvps';
@@ -60,6 +66,7 @@ export function shouldProxyServiceActionToOceanlinux(
   order: OrderAutomationFields | null | undefined
 ): boolean {
   if (!order?.ipAddress) return false;
+  if (isSlotIpOrder(order)) return false;
   if (isAdvpsOrder(order)) return false; // handled by advps-action proxy
   if (isSmartVpsOrder(order)) return false;
   if (isLocalHostycareOrder(order)) return false;
@@ -79,6 +86,7 @@ export function isDirectServerControlOrder(
   order: OrderAutomationFields | null | undefined
 ): boolean {
   if (!order) return false;
+  if (isSlotIpOrder(order)) return false;
 
   if (isSmartVpsOrder(order) && (order.smartvpsServiceId || order.ipAddress)) return true;
   if (isLocalHostycareOrder(order)) return true;

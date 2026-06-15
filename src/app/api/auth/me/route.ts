@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import Order from "@/models/orderModel";
+import { resolveCompanyAutomationForIpStock } from "@/lib/companyAutomation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     await connectDB();
 
     const order = await Order.findById(sessionCookie.value).select(
-      "productName memory price ipAddress username password os expiryDate provider hostycareServiceId smartvpsServiceId advpsServiceId advpsOrderId advpsRebuildCount advpsRebuildCountMonth netbayServiceId ipStockId autoProvisioned slotIpPackageId provisioningStatus provisioningError lastAction lastActionTime lastSyncTime status panelUsername"
+      "productName memory price ipAddress username password os expiryDate provider hostycareServiceId smartvpsServiceId advpsServiceId advpsOrderId advpsRebuildCount advpsRebuildCountMonth netbayServiceId ipStockId autoProvisioned slotIpPackageId provisioningStatus provisioningError lastAction lastActionTime lastSyncTime status panelUsername serverDetails hostname"
     );
 
     if (!order) {
@@ -28,7 +29,13 @@ export async function GET(request: NextRequest) {
       return response;
     }
 
-    return NextResponse.json({ success: true, order });
+    const companyAutomation = await resolveCompanyAutomationForIpStock(order.ipStockId);
+
+    return NextResponse.json({
+      success: true,
+      order,
+      companyAutomation,
+    });
   } catch (error: any) {
     console.error("[PANEL-AUTH] Me error:", error.message);
     return NextResponse.json(
