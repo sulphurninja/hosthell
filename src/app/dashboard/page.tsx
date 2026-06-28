@@ -127,9 +127,9 @@ export default function DashboardPage() {
       if (data.success) {
         setOrder(data.order);
         setCompanyAutomation(data.companyAutomation || null);
-      } else router.push("/access-server");
+      } else router.push("/login");
     } catch {
-      router.push("/access-server");
+      router.push("/login");
     } finally {
       setLoading(false);
     }
@@ -202,7 +202,7 @@ export default function DashboardPage() {
         }
       }
       setPowerState(ps);
-      if (data.result?.credentialsUpdated || data.order?.password) {
+      if (data.result?.credentialsUpdated) {
         toast.success("Synced — credentials updated");
       } else {
         toast.success("Synced with server");
@@ -218,7 +218,16 @@ export default function DashboardPage() {
   }, [fetchOrder]);
 
   const fetchTemplates = useCallback(async () => {
-    if (!order || order.provider === "smartvps") return;
+    if (!order) return;
+
+    // SmartVPS uses a fixed OS list (no API call needed)
+    if (order.provider === "smartvps") {
+      const osMap: Record<string, string> = {};
+      smartvpsOsOptions.forEach((o) => { osMap[o.value] = o.label; });
+      setTemplates(osMap);
+      return;
+    }
+
     setTemplatesLoading(true);
     try {
       const res = await fetch("/api/server/action", {
@@ -323,22 +332,28 @@ export default function DashboardPage() {
         toast.error(data.message || data.error || `${action} failed`);
         return;
       }
+      const actionMessages: Record<string, string> = {
+        start: "Server started successfully",
+        stop: "Server stopped successfully",
+        restart: "Server restarted successfully",
+        format: "Format submitted — server is rebuilding",
+        changeos: "OS change submitted successfully",
+        reinstall: "Format submitted — server is rebuilding",
+        resetmac: "MAC address reset successfully",
+        generatepassword: "New password generated",
+        reboot: "Server rebooted successfully",
+      };
+
       if (action === "resetmac") {
         const oldMac = data.result?.oldMacAddress;
         const newMac = data.result?.newMacAddress;
-        if (oldMac && newMac) {
-          toast.success(`MAC address updated: ${oldMac} -> ${newMac}`);
-        } else {
-          toast.success("MAC address reset successfully");
-        }
-      } else if (action === "generatepassword") {
-        toast.success(data.message || "New password generated");
-        await fetchOrder();
-      } else if (action === "reinstall" || action === "format") {
-        toast.success(data.result?.message || "Format submitted — server is rebuilding");
-        await fetchOrder();
+        toast.success(oldMac && newMac ? `MAC reset: ${oldMac} → ${newMac}` : "MAC address reset successfully");
       } else {
-        toast.success(data.result?.message || `${action} command sent`);
+        toast.success(actionMessages[action] || `${action} completed successfully`);
+      }
+
+      if (["generatepassword", "reinstall", "format", "changeos"].includes(action)) {
+        await fetchOrder();
       }
       setTimeout(() => {
         fetchServerSync();
@@ -351,11 +366,10 @@ export default function DashboardPage() {
   };
 
   const handleReinstall = async () => {
+    if (!selectedTemplate) { toast.error("Select an OS"); return; }
     if (order?.provider === "smartvps") {
-      if (!selectedOs) { toast.error("Select an OS"); return; }
-      await performAction("changeos", { osType: selectedOs });
+      await performAction("changeos", { osType: selectedTemplate });
     } else {
-      if (!selectedTemplate) { toast.error("Select a template"); return; }
       await performAction("reinstall", { templateId: selectedTemplate, newPassword: reinstallPassword || undefined });
     }
   };
@@ -458,10 +472,10 @@ export default function DashboardPage() {
     : null;
 
   return (
-    <div className="space-y-6 max-w-5xl animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 max-w-5xl animate-fade-in">
       {/* Server Overview */}
       <HellCard icon={<Server className="h-5 w-5" />} title="Server Overview" desc="Your server details and status">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
           <StatItem icon={<Monitor className="h-4 w-4" />} label="Product" value={order.productName} />
           <StatItem
             icon={<Globe className="h-4 w-4" />}
@@ -491,22 +505,22 @@ export default function DashboardPage() {
               : isNetbay ? "Netbay"
               : manageProvider
           } />
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-            <Calendar className="h-4 w-4 text-zinc-500 mt-0.5" />
+          <div className="flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+            <Calendar className="h-4 w-4 text-zinc-500 mt-0.5 flex-shrink-0" />
             <div className="min-w-0">
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wider">Expires</p>
-              <p className="text-sm font-medium text-zinc-200">
+              <p className="text-[10px] sm:text-[11px] text-zinc-500 uppercase tracking-wider">Expires</p>
+              <p className="text-xs sm:text-sm font-medium text-zinc-200">
                 {order.expiryDate ? new Date(order.expiryDate).toLocaleDateString() : "N/A"}
               </p>
               {daysLeft !== null && (
-                <p className={`text-[11px] mt-0.5 ${daysLeft <= 3 ? "text-red-400" : daysLeft <= 7 ? "text-amber-400" : "text-zinc-500"}`}>
+                <p className={`text-[10px] sm:text-[11px] mt-0.5 ${daysLeft <= 3 ? "text-red-400" : daysLeft <= 7 ? "text-amber-400" : "text-zinc-500"}`}>
                   {daysLeft > 0 ? `${daysLeft} days left` : daysLeft === 0 ? "Expires today" : "Expired"}
                 </p>
               )}
             </div>
           </div>
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-            <Power className="h-4 w-4 text-zinc-500 mt-0.5" />
+          <div className="flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+            <Power className="h-4 w-4 text-zinc-500 mt-0.5 flex-shrink-0" />
             <div className="min-w-0">
               <p className="text-[11px] text-zinc-500 uppercase tracking-wider">Status</p>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -540,15 +554,15 @@ export default function DashboardPage() {
                   <CredRow icon={<Hash className="h-4 w-4" />} label="Port" value={slotIpConnection.port} onCopy={() => cp(slotIpConnection.port, "Port")} />
                 )}
                 <CredRow icon={<User className="h-4 w-4" />} label="Username" value={slotIpConnection.username} onCopy={() => cp(slotIpConnection.username, "Username")} />
-                <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                     <Lock className="h-4 w-4 text-zinc-500 flex-shrink-0" />
-                    <span className="text-xs text-zinc-500">Password:</span>
-                    <code className="font-mono text-sm text-zinc-200 font-medium">
+                    <span className="text-[11px] sm:text-xs text-zinc-500 flex-shrink-0">Password:</span>
+                    <code className="font-mono text-xs sm:text-sm text-zinc-200 font-medium truncate">
                       {showPassword ? slotIpConnection.password : "••••••••••••"}
                     </code>
                   </div>
-                  <div className="flex items-center gap-0.5">
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200" onClick={() => setShowPassword(!showPassword)}>
                       {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </Button>
@@ -573,15 +587,15 @@ export default function DashboardPage() {
               <>
             <CredRow icon={<Globe className="h-4 w-4" />} label="IP Address" value={order.ipAddress} onCopy={() => cp(order.ipAddress, "IP")} />
             <CredRow icon={<User className="h-4 w-4" />} label="Username" value={order.username} onCopy={() => cp(order.username, "Username")} />
-            <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <Lock className="h-4 w-4 text-zinc-500 flex-shrink-0" />
-                <span className="text-xs text-zinc-500">Password:</span>
-                <code className="font-mono text-sm text-zinc-200 font-medium">
+                <span className="text-[11px] sm:text-xs text-zinc-500 flex-shrink-0">Password:</span>
+                <code className="font-mono text-xs sm:text-sm text-zinc-200 font-medium truncate">
                   {showPassword ? order.password : "••••••••••••"}
                 </code>
               </div>
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-0.5 flex-shrink-0">
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200" onClick={() => setShowPassword(!showPassword)}>
                   {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
@@ -592,13 +606,13 @@ export default function DashboardPage() {
             </div>
 
             {order.os && !order.os.toLowerCase().includes("windows") && (
-              <div className="p-3 rounded-lg bg-black/40 border border-zinc-800">
+              <div className="p-2.5 sm:p-3 rounded-lg bg-black/40 border border-zinc-800">
                 <p className="text-[11px] text-zinc-500 mb-1 uppercase tracking-wider">Quick Connect</p>
-                <div className="flex items-center justify-between">
-                  <code className="text-red-400 font-mono text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <code className="text-red-400 font-mono text-xs sm:text-sm truncate">
                     ssh {order.username}@{order.ipAddress}
                   </code>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200"
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200 flex-shrink-0"
                     onClick={() => cp(`ssh ${order.username}@${order.ipAddress}`, "SSH command")}>
                     <Copy className="h-3.5 w-3.5" />
                   </Button>
@@ -614,14 +628,14 @@ export default function DashboardPage() {
       {/* Server Control — hidden for slot IP proxy orders */}
       {!isSlotIp && (
       <div id="control" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 overflow-hidden">
-        <div className="p-6 border-b border-zinc-800/80">
+        <div className="p-4 sm:p-6 border-b border-zinc-800/80">
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center">
+            <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0">
               <Zap className="h-4 w-4 text-red-500" />
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">Server Control</h2>
-              <p className="text-xs text-zinc-500">
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-semibold text-white">Server Control</h2>
+              <p className="text-[11px] sm:text-xs text-zinc-500 truncate">
                 {isManual
                   ? "Request server actions — admin will review and process"
                   : isAutoManaged
@@ -631,7 +645,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-        <div className="p-6 space-y-6">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
 
           {/* ===== MANUAL ORDERS: Request-based actions ===== */}
           {isManual ? (
@@ -663,39 +677,39 @@ export default function DashboardPage() {
 
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Request Server Actions</h3>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 sm:gap-2.5">
                   <Button
                     onClick={() => requestServerAction("start")}
                     disabled={requestLoading || (pendingRequest?.status === "pending")}
-                    className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20"
+                    className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 text-xs sm:text-sm"
                   >
-                    {requestLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                    {requestLoading ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <Play className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Request Start
                   </Button>
                   <Button
                     onClick={() => requestServerAction("stop")}
                     disabled={requestLoading || (pendingRequest?.status === "pending")}
-                    className="bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20"
+                    className="bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 text-xs sm:text-sm"
                   >
-                    {requestLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Square className="mr-2 h-4 w-4" />}
+                    {requestLoading ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <Square className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Request Stop
                   </Button>
                   <Button
                     onClick={() => requestServerAction("restart")}
                     disabled={requestLoading || (pendingRequest?.status === "pending")}
                     variant="outline"
-                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs sm:text-sm"
                   >
-                    {requestLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    {requestLoading ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <RotateCcw className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Request Restart
                   </Button>
                   <Button
                     onClick={() => requestServerAction("format")}
                     disabled={requestLoading || (pendingRequest?.status === "pending")}
                     variant="outline"
-                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs sm:text-sm"
                   >
-                    {requestLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    {requestLoading ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <Trash2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Request Format
                   </Button>
                 </div>
@@ -709,32 +723,32 @@ export default function DashboardPage() {
               {/* ===== AUTO-PROVISIONED: Direct actions ===== */}
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Power Management</h3>
-                <div className="flex flex-wrap gap-2.5">
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-2.5">
                   <Button onClick={() => performAction("start")} disabled={actionLoading !== null}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white border-0">
-                    {actionLoading === "start" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white border-0 text-xs sm:text-sm">
+                    {actionLoading === "start" ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <Play className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Start
                   </Button>
                   <Button onClick={() => performAction("stop")} disabled={actionLoading !== null}
-                    className="bg-red-600 hover:bg-red-700 text-white border-0">
-                    {actionLoading === "stop" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Square className="mr-2 h-4 w-4" />}
+                    className="bg-red-600 hover:bg-red-700 text-white border-0 text-xs sm:text-sm">
+                    {actionLoading === "stop" ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <Square className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Stop
                   </Button>
                   <Button variant="outline" onClick={() => performAction("restart")} disabled={actionLoading !== null}
-                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600">
-                    {actionLoading === "restart" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600 text-xs sm:text-sm">
+                    {actionLoading === "restart" ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" /> : <RotateCcw className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />}
                     Restart
                   </Button>
                   <Button
                     variant="outline"
                     onClick={fetchServerSync}
                     disabled={statusLoading || syncLoading}
-                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600"
+                    className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600 text-xs sm:text-sm"
                   >
                     {statusLoading || syncLoading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4 animate-spin" />
                     ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
+                      <RefreshCw className="mr-1.5 sm:mr-2 h-3.5 sm:h-4 w-3.5 sm:w-4" />
                     )}
                     Sync
                   </Button>
@@ -797,46 +811,13 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Format - SmartVPS only (ADVPS uses the Reinstall section below) */}
-              {isSmartVps && (
-                <div>
-                  <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Format Server</h3>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button className="bg-red-600 hover:bg-red-700 text-white border-0" disabled={actionLoading !== null}>
-                        {actionLoading === "format" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                        Format Server
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent className="bg-zinc-900 border-zinc-800">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle className="flex items-center gap-2 text-white">
-                          <AlertTriangle className="h-5 w-5 text-red-500" />
-                          Format Server
-                        </AlertDialogTitle>
-                        <AlertDialogDescription className="text-zinc-400">
-                          This will erase all data and reset to factory state. Cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">Cancel</AlertDialogCancel>
-                        <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={() => performAction("format")}>
-                          Format
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
-
-              {/* Format / Rebuild */}
-              {!isSmartVps && (
+              {/* Format / Rebuild — all providers */}
               <div>
                 <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">
                   {isAdvps ? "Rebuild Server" : isNetbay ? "Rebuild Server (Netbay)" : isCompanyVirtualizor ? "Format / Reinstall (Virtualizor)" : isCompanyResellerApi ? "Format / Reinstall" : "Format Server"}
                 </h3>
 
-                <div className="space-y-3 max-w-md">
+                <div className="space-y-3 max-w-full sm:max-w-md">
                   {isAutoManaged && !isAdvps && (
                     <p className="text-xs text-zinc-500 px-1">
                       {isNetbay && "Managed via Netbay API on OceanLinux. "}
@@ -919,14 +900,6 @@ export default function DashboardPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                      {!isAdvps && (
-                        <div className="space-y-1.5">
-                          <Label htmlFor="reinstallPwd" className="text-xs text-zinc-400">New Password (optional)</Label>
-                          <Input id="reinstallPwd" type="text" placeholder="Auto-generated if empty"
-                            value={reinstallPassword} onChange={(e) => setReinstallPassword(e.target.value)}
-                            className="bg-zinc-900 border-zinc-700 text-zinc-200 placeholder:text-zinc-600" />
-                        </div>
-                      )}
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
@@ -959,7 +932,6 @@ export default function DashboardPage() {
                   )}
                 </div>
               </div>
-              )}
             </>
           )}
         </div>
@@ -974,28 +946,28 @@ export default function DashboardPage() {
 function HellCard({ icon, title, desc, children }: { icon: React.ReactNode; title: string; desc: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 overflow-hidden">
-      <div className="p-6 border-b border-zinc-800/80">
+      <div className="p-4 sm:p-6 border-b border-zinc-800/80">
         <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500">{icon}</div>
-          <div>
-            <h2 className="text-base font-semibold text-white">{title}</h2>
-            <p className="text-xs text-zinc-500">{desc}</p>
+          <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500 flex-shrink-0">{icon}</div>
+          <div className="min-w-0">
+            <h2 className="text-sm sm:text-base font-semibold text-white">{title}</h2>
+            <p className="text-[11px] sm:text-xs text-zinc-500 truncate">{desc}</p>
           </div>
         </div>
       </div>
-      <div className="p-6">{children}</div>
+      <div className="p-4 sm:p-6">{children}</div>
     </div>
   );
 }
 
 function StatItem({ icon, label, value, onCopy }: { icon: React.ReactNode; label: string; value: string; onCopy?: () => void }) {
   return (
-    <div className="flex items-start gap-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-      <div className="text-zinc-500 mt-0.5">{icon}</div>
+    <div className="flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+      <div className="text-zinc-500 mt-0.5 flex-shrink-0">{icon}</div>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
+        <p className="text-[10px] sm:text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
         <div className="flex items-center gap-1.5">
-          <p className="text-sm font-medium text-zinc-200 truncate">{value}</p>
+          <p className="text-xs sm:text-sm font-medium text-zinc-200 truncate">{value}</p>
           {onCopy && (
             <button onClick={onCopy} className="text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0">
               <Copy className="h-3 w-3" />
@@ -1009,11 +981,11 @@ function StatItem({ icon, label, value, onCopy }: { icon: React.ReactNode; label
 
 function CredRow({ icon, label, value, onCopy }: { icon: React.ReactNode; label: string; value: string; onCopy: () => void }) {
   return (
-    <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
-      <div className="flex items-center gap-2 min-w-0">
+    <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         <div className="text-zinc-500 flex-shrink-0">{icon}</div>
-        <span className="text-xs text-zinc-500">{label}:</span>
-        <code className="font-mono text-sm text-zinc-200 font-medium">{value}</code>
+        <span className="text-[11px] sm:text-xs text-zinc-500 flex-shrink-0">{label}:</span>
+        <code className="font-mono text-xs sm:text-sm text-zinc-200 font-medium truncate">{value}</code>
       </div>
       <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-zinc-200 flex-shrink-0" onClick={onCopy}>
         <Copy className="h-3.5 w-3.5" />

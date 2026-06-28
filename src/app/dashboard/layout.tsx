@@ -27,10 +27,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <div className="lg:pl-64">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-6 lg:px-8">
-          <div className="flex items-center gap-3 ml-10 lg:ml-0">
-            <Flame className="h-4 w-4 text-red-500" />
-            <h1 className="text-sm font-semibold text-zinc-200 truncate">
+        <header className="sticky top-0 z-30 flex h-12 sm:h-14 items-center gap-2 sm:gap-4 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2 sm:gap-3 ml-10 lg:ml-0 min-w-0">
+            <Flame className="h-4 w-4 text-red-500 flex-shrink-0" />
+            <h1 className="text-xs sm:text-sm font-semibold text-zinc-200 truncate">
               {productName || "Server Dashboard"}
             </h1>
           </div>
@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         {/* Main content */}
-        <main className="p-6 lg:p-8">{children}</main>
+        <main className="p-3 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

@@ -7,11 +7,11 @@ export function middleware(request: NextRequest) {
 
   if (pathname.startsWith("/dashboard")) {
     if (!session) {
-      return NextResponse.redirect(new URL("/access-server", request.url));
+      return NextResponse.redirect(new URL("/login", request.url));
     }
   }
 
-  if (pathname === "/access-server" && session) {
+  if (pathname === "/login" && session) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
@@ -19,5 +19,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/access-server"],
+  matcher: ["/dashboard/:path*", "/login"],
 };
