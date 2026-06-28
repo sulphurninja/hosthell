@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   title: "Hosthell — Raise Hell. Own Your Infra.",
   description:
     "The AI-powered hosting business OS. Launch, run, and scale a full hosting company in minutes. White-labeled storefronts, client dashboards, billing, automated provisioning, and an AI DevOps agent that handles everything.",
-  icons: { icon: "/favicon.ico" },
+  icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({
